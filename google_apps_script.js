@@ -23,7 +23,7 @@ const LABEL_NAME   = "TaskFlow/Processed";       // Gmail label for scanned emai
 const CENTRES = [
   "Nettoor","Kumbalam","Trivandrum","Bhubaneswar",
   "Kannur","Changanassery","Guwahati","Kollam",
-  "Mysore","Bangalore","Ahmedabad","Others"
+  "Mysore","Bangalore","Ahmedabad","Visakhapatnam","Others"
 ];
 
 const CENTRE_KEYWORDS = {
@@ -38,6 +38,7 @@ const CENTRE_KEYWORDS = {
   "Mysore":        ["mysore","mysuru","mys"],
   "Bangalore":     ["bangalore","bengaluru","blr"],
   "Ahmedabad":     ["ahmedabad","ahd","gujarat"],
+  "Visakhapatnam": ["visakhapatnam","vizag","vsk","vsp","vishakhapatnam"],
 };
 
 const TASK_KEYWORDS = [
