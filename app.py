@@ -285,7 +285,7 @@ def css():
     }}, {AUTO_REFRESH_SECONDS * 1000});
     </script>""", unsafe_allow_html=True)
 
-def task_card(row):
+def task_card(row, pfx=""):
     status  = str(row.get("Status","")).strip()
     overdue = int(row.get("Days Overdue",0))
     cat     = str(row.get("Category",""))
@@ -335,21 +335,21 @@ def task_card(row):
 
     if is_notmine:
         c1,c2 = st.columns([1,5])
-        if c1.button("↩ Reactivate", key=f"rm_{tid}"): update_field(tid,"Status","Pending"); st.rerun()
+        if c1.button("↩ Reactivate", key=f"rm_{pfx}{tid}"): update_field(tid,"Status","Pending"); st.rerun()
         if notes:
             with st.expander("📝 Notes"): st.caption(notes)
     elif not is_done:
         c1,c2,c3,c4,c5,c6 = st.columns(6)
-        if c1.button("✅ Done",     key=f"d_{tid}"): update_field(tid,"Status","Done");     st.rerun()
-        if c2.button("⏸ Hold",     key=f"h_{tid}"): update_field(tid,"Status","On Hold");  st.rerun()
-        if c3.button("❌ Reject",   key=f"r_{tid}"): update_field(tid,"Status","Rejected"); st.rerun()
-        if c4.button("🚫 Not Mine", key=f"nm_{tid}"): update_field(tid,"Status","Not Mine"); st.rerun()
-        if c5.button("👤 Assign",   key=f"a_{tid}"):
-            st.session_state[f"rs_{tid}"] = not st.session_state.get(f"rs_{tid}",False)
-        if c6.button("🗑 Delete",   key=f"x_{tid}"): delete_row(tid); st.rerun()
-        if st.session_state.get(f"rs_{tid}"):
-            nm = st.text_input("Reassign to:", key=f"rn_{tid}", placeholder="Name / email")
-            if st.button("Confirm →", key=f"rc_{tid}"):
+        if c1.button("✅ Done",     key=f"d_{pfx}{tid}"): update_field(tid,"Status","Done");     st.rerun()
+        if c2.button("⏸ Hold",     key=f"h_{pfx}{tid}"): update_field(tid,"Status","On Hold");  st.rerun()
+        if c3.button("❌ Reject",   key=f"r_{pfx}{tid}"): update_field(tid,"Status","Rejected"); st.rerun()
+        if c4.button("🚫 Not Mine", key=f"nm_{pfx}{tid}"): update_field(tid,"Status","Not Mine"); st.rerun()
+        if c5.button("👤 Assign",   key=f"a_{pfx}{tid}"):
+            st.session_state[f"rs_{pfx}{tid}"] = not st.session_state.get(f"rs_{pfx}{tid}",False)
+        if c6.button("🗑 Delete",   key=f"x_{pfx}{tid}"): delete_row(tid); st.rerun()
+        if st.session_state.get(f"rs_{pfx}{tid}"):
+            nm = st.text_input("Reassign to:", key=f"rn_{pfx}{tid}", placeholder="Name / email")
+            if st.button("Confirm →", key=f"rc_{pfx}{tid}"):
                 update_field(tid,"Status","Reassigned"); update_field(tid,"Reassigned To",nm)
                 st.session_state[f"rs_{tid}"] = False; st.rerun()
         if notes:
@@ -477,14 +477,14 @@ def main():
                 clr = CENTRE_COLORS.get(centre,"#2563EB")
                 st.markdown(f'<div class="ch" style="color:{clr}">🏥 {centre.upper()} · {len(act)} active</div>', unsafe_allow_html=True)
                 for _,row in cdf.sort_values(["Days Overdue","Priority"],ascending=[False,True]).iterrows():
-                    task_card(row)
+                    task_card(row, pfx="t1_")
 
     with t2:
         odf = filt[(filt["Days Overdue"]>0)&(~filt["Status"].isin(["Done","Rejected"]))].sort_values("Days Overdue",ascending=False)
         if odf.empty: st.success("🎉 No overdue tasks!")
         else:
             st.error(f"⚠️ {len(odf)} overdue — most critical first")
-            for _,row in odf.iterrows(): task_card(row)
+            for _,row in odf.iterrows(): task_card(row, pfx="t2_")
 
     with t3:
         smry = []
@@ -498,7 +498,7 @@ def main():
             pick = st.selectbox("Drill into centre:", CENTRES)
             pdf  = filt[filt["Centre"]==pick]
             if not pdf.empty:
-                for _,row in pdf.sort_values("Days Overdue",ascending=False).iterrows(): task_card(row)
+                for _,row in pdf.sort_values("Days Overdue",ascending=False).iterrows(): task_card(row, pfx="t3_")
             else: st.info(f"No tasks for {pick}.")
 
     with t4:
