@@ -35,12 +35,12 @@ AUTO_REFRESH_SECONDS = 30   # how often the app auto-refreshes to pick up new ta
 
 CENTRES    = ["Nettoor","Kumbalam","Trivandrum","Bhubaneswar","Kannur","Changanassery","Guwahati","Kollam","Mysore","Bangalore","Ahmedabad","Visakhapatnam","Others"]
 CATEGORIES = ["Civil Work","Admin / Hardware","Regulatory / Licence","IT / Systems","QMS / HMS","Operations","Finance","HR / Admin","Legal / Contracts","Other"]
-STATUSES   = ["Pending","Not Started","In Progress","On Hold","Done","Rejected","Reassigned"]
+STATUSES   = ["Pending","Not Started","In Progress","On Hold","Done","Rejected","Reassigned","Not Mine"]
 PRIORITIES = ["","High","Medium","Low"]
 SOURCES    = ["Email","Tracker","Manual","Meeting","WhatsApp"]
 SHEET_COLS = ["ID","Centre","Category","Title","Due Date","Days Overdue","Status","Priority","Owner","Source","Notes","Reassigned To","Date Added","Last Updated","Email Message ID"]
 CENTRE_COLORS = {"Nettoor":"#6366F1","Kumbalam":"#7C3AED","Trivandrum":"#059669","Bhubaneswar":"#65A30D","Kannur":"#EA580C","Changanassery":"#0891B2","Guwahati":"#2563EB","Kollam":"#0D9488","Mysore":"#D97706","Bangalore":"#DB2777","Ahmedabad":"#F59E0B","Visakhapatnam":"#DC2626","Others":"#16A34A"}
-STATUS_ICON = {"Pending":"🔵","Not Started":"⚪","In Progress":"🟡","On Hold":"🟠","Done":"✅","Rejected":"❌","Reassigned":"👤"}
+STATUS_ICON = {"Pending":"🔵","Not Started":"⚪","In Progress":"🟡","On Hold":"🟠","Done":"✅","Rejected":"❌","Reassigned":"👤","Not Mine":"🚫"}
 SCOPES = ["https://spreadsheets.google.com/feeds","https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/drive"]
 
 PING_SHEET_ID      = "1uf4pqKHEAbw6ny7CVZZVMw23PTfmv0QZzdCyj4fU33c"
@@ -145,7 +145,7 @@ def css():
     [data-testid="stSidebar"]{background:#14172080;border-right:1px solid rgba(255,255,255,.06)}
     .block-container{padding-top:1.2rem!important}
     .tc{background:#1C2030;border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:13px 17px;margin-bottom:9px;border-left:4px solid #2563EB}
-    .tc.ov{border-left-color:#EF4444}.tc.hold{border-left-color:#F59E0B}.tc.reg{border-left-color:#8B5CF6}.tc.qms{border-left-color:#EC4899}.tc.done{opacity:.38;border-left-color:#4B5563}
+    .tc.ov{border-left-color:#EF4444}.tc.hold{border-left-color:#F59E0B}.tc.reg{border-left-color:#8B5CF6}.tc.qms{border-left-color:#EC4899}.tc.done{opacity:.38;border-left-color:#4B5563}.tc.notmine{opacity:.25;border-left-color:#374151;filter:grayscale(.9)}
     .ttl{font-size:14px;font-weight:500;color:#E8EAFF;line-height:1.4;margin-bottom:7px}
     .ttl.done{text-decoration:line-through;color:#6B7280}
     .tmeta{font-size:11px;color:#7880A4;display:flex;flex-wrap:wrap;gap:5px;align-items:center}
@@ -184,17 +184,20 @@ def task_card(row):
     due     = str(row.get("Due Date",""))
     notes   = str(row.get("Notes",""))
     reassign= str(row.get("Reassigned To",""))
-    is_done = status in ["Done","Rejected"]
+    is_done    = status in ["Done","Rejected"]
+    is_notmine = status == "Not Mine"
     clr     = CENTRE_COLORS.get(centre,"#2563EB")
 
     cc = "tc"
-    if is_done:               cc += " done"
+    if is_notmine:            cc += " notmine"
+    elif is_done:             cc += " done"
     elif "Regulatory" in cat: cc += " reg"
     elif "QMS" in cat:        cc += " qms"
     elif status=="On Hold":   cc += " hold"
     elif overdue>0:           cc += " ov"
 
-    if is_done:       sb = f'<span class="bdg dn_">{STATUS_ICON.get(status,"")} {status}</span>'
+    if is_notmine:    sb = '<span class="bdg ct_">🚫 Not Mine</span>'
+    elif is_done:     sb = f'<span class="bdg dn_">{STATUS_ICON.get(status,"")} {status}</span>'
     elif status=="On Hold": sb = '<span class="bdg hd_">⏸ On Hold</span>'
     elif overdue>0:   sb = f'<span class="bdg ov_">▲ {overdue}d late</span>'
     elif "Regulatory" in cat: sb = '<span class="bdg rg_">⚖ Regulatory</span>'
@@ -209,21 +212,27 @@ def task_card(row):
     db = f'<span>📅 {due}</span>'                     if due else ""
     ob = f'<span>👤 {owner}</span>'                   if owner and owner!="Dr. Vaisakh V S" else ""
     rb = f'<span>↪ {reassign}</span>'                 if reassign else ""
-    tc = "ttl done" if is_done else "ttl"
+    tc = "ttl done" if (is_done or is_notmine) else "ttl"
 
     st.markdown(f"""<div class="{cc}" style="border-left-color:{clr}">
         <div class="{tc}">{title}</div>
         <div class="tmeta">{sb}{s2}{pb}{cb}{db}{ob}{rb}</div>
     </div>""", unsafe_allow_html=True)
 
-    if not is_done:
-        c1,c2,c3,c4,c5 = st.columns(5)
-        if c1.button("✅ Done",   key=f"d_{tid}"): update_field(tid,"Status","Done");    st.rerun()
-        if c2.button("⏸ Hold",   key=f"h_{tid}"): update_field(tid,"Status","On Hold"); st.rerun()
-        if c3.button("❌ Reject", key=f"r_{tid}"): update_field(tid,"Status","Rejected");st.rerun()
-        if c4.button("👤 Assign", key=f"a_{tid}"):
+    if is_notmine:
+        c1,c2 = st.columns([1,5])
+        if c1.button("↩ Reactivate", key=f"rm_{tid}"): update_field(tid,"Status","Pending"); st.rerun()
+        if notes:
+            with st.expander("📝 Notes"): st.caption(notes)
+    elif not is_done:
+        c1,c2,c3,c4,c5,c6 = st.columns(6)
+        if c1.button("✅ Done",     key=f"d_{tid}"): update_field(tid,"Status","Done");     st.rerun()
+        if c2.button("⏸ Hold",     key=f"h_{tid}"): update_field(tid,"Status","On Hold");  st.rerun()
+        if c3.button("❌ Reject",   key=f"r_{tid}"): update_field(tid,"Status","Rejected"); st.rerun()
+        if c4.button("🚫 Not Mine", key=f"nm_{tid}"): update_field(tid,"Status","Not Mine"); st.rerun()
+        if c5.button("👤 Assign",   key=f"a_{tid}"):
             st.session_state[f"rs_{tid}"] = not st.session_state.get(f"rs_{tid}",False)
-        if c5.button("🗑 Delete", key=f"x_{tid}"): delete_row(tid); st.rerun()
+        if c6.button("🗑 Delete",   key=f"x_{tid}"): delete_row(tid); st.rerun()
         if st.session_state.get(f"rs_{tid}"):
             nm = st.text_input("Reassign to:", key=f"rn_{tid}", placeholder="Name / email")
             if st.button("Confirm →", key=f"rc_{tid}"):
@@ -327,11 +336,11 @@ def main():
     st.caption(f"Dr. Vaisakh VS · RheumaCARE · {datetime.now().strftime('%d %b %Y, %H:%M')}")
 
     if not df.empty:
-        ov = len(df[(df["Days Overdue"]>0)&(~df["Status"].isin(["Done","Rejected"]))])
+        ov = len(df[(df["Days Overdue"]>0)&(~df["Status"].isin(["Done","Rejected","Not Mine"]))])
         pd_= len(df[df["Status"].isin(["Pending","Not Started","In Progress"])])
         hd = len(df[df["Status"]=="On Hold"])
         dn = len(df[df["Status"].isin(["Done","Rejected"])])
-        ac = len(df[~df["Status"].isin(["Done","Rejected"])])
+        ac = len(df[~df["Status"].isin(["Done","Rejected","Not Mine"])])
         st.markdown(f"""<div class="mrow">
           <div class="met"><div class="mn" style="color:#E8EAFF">{ac}</div><div class="ml">Active</div></div>
           <div class="met"><div class="mn" style="color:#F87171">{ov}</div><div class="ml">Overdue</div></div>

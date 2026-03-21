@@ -239,6 +239,9 @@ function scanGmailForTasks() {
   }
 
   Logger.log("✅ Gmail scan complete. Tasks added: " + newTasksAdded.length);
+
+  // Check if any "Not Mine" tasks should be reactivated
+  reactivateNotMineTasks(ws);
 }
 
 // ── DAILY SUMMARY (runs at 8 AM) ────────────────────────────
@@ -302,6 +305,78 @@ function sendDailySummary() {
     emailBody
   );
   Logger.log("Daily summary sent.");
+}
+
+// ── AUTO-REACTIVATE "NOT MINE" TASKS ────────────────────────
+// If a task is marked "Not Mine" and a subsequent email in the
+// same thread directly mentions Vaisakh (in TO/CC or body),
+// reactivate the task back to "Pending".
+function reactivateNotMineTasks(ws) {
+  const lastRow = ws.getLastRow();
+  if (lastRow < 2) return;
+
+  const data = ws.getRange(2, 1, lastRow - 1, SHEET_COLS.length).getValues();
+  const idxStatus      = SHEET_COLS.indexOf("Status");
+  const idxMsgId       = SHEET_COLS.indexOf("Email Message ID");
+  const idxLastUpdated = SHEET_COLS.indexOf("Last Updated");
+  const idxTitle       = SHEET_COLS.indexOf("Title");
+
+  const VAISAKH_PATTERNS = ["vaisakh", "vaishak", "dr. vaisakh", "dr vaisakh"];
+
+  data.forEach((row, i) => {
+    if (row[idxStatus] !== "Not Mine") return;
+    const msgId = String(row[idxMsgId] || "").trim();
+    if (!msgId) return;
+
+    let markedAt;
+    try {
+      markedAt = new Date(row[idxLastUpdated]);
+      if (isNaN(markedAt.getTime())) markedAt = new Date(0);
+    } catch(e) { markedAt = new Date(0); }
+
+    try {
+      // Get the original message and its thread
+      const origMsg = GmailApp.getMessageById(msgId);
+      if (!origMsg) return;
+      const thread = origMsg.getThread();
+      const messages = thread.getMessages();
+
+      // Check messages that came AFTER this task was marked "Not Mine"
+      const newer = messages.filter(m => m.getDate() > markedAt);
+      if (newer.length === 0) return;
+
+      // Check if Vaisakh is directly mentioned in any newer message
+      const shouldReactivate = newer.some(m => {
+        const to      = (m.getTo()   || "").toLowerCase();
+        const cc      = (m.getCc()   || "").toLowerCase();
+        const body    = (m.getPlainBody() || "").toLowerCase().substring(0, 2000);
+        const subject = (m.getSubject() || "").toLowerCase();
+        const allText = to + " " + cc + " " + body + " " + subject;
+        return VAISAKH_PATTERNS.some(p => allText.includes(p));
+      });
+
+      if (shouldReactivate) {
+        const sheetRow  = i + 2; // +2 for header offset
+        const statusCol = idxStatus + 1;
+        const updCol    = idxLastUpdated + 1;
+        const now       = Utilities.formatDate(new Date(), "Asia/Kolkata", "yyyy-MM-dd HH:mm");
+        ws.getRange(sheetRow, statusCol).setValue("Pending");
+        ws.getRange(sheetRow, updCol).setValue(now);
+        const title = row[idxTitle] || "task";
+        Logger.log(`♻️ Reactivated "Not Mine" task: ${title}`);
+        // Notify
+        try {
+          GmailApp.sendEmail(
+            NOTIFY_EMAIL,
+            `♻️ TaskFlow: Task reactivated — ${title}`,
+            `Hi Vaisakh,\n\nA task you marked as "Not Mine" has been reactivated because a follow-up email mentioned you directly.\n\nTask: ${title}\n\nOpen your Growth Manager Dashboard to take action.\n\n— TaskFlow Auto-Scanner`
+          );
+        } catch(e) {}
+      }
+    } catch(e) {
+      Logger.log("Error checking Not Mine task: " + e);
+    }
+  });
 }
 
 // ── MANUAL TRIGGER: Scan now ─────────────────────────────────
