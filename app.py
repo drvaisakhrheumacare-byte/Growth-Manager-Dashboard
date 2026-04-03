@@ -4,7 +4,7 @@ st.set_page_config(page_title="Growth Manager Dashboard", page_icon="📊", layo
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
-from datetime import datetime, date
+from datetime import datetime, date, timezone, timedelta
 import time
 import hashlib
 
@@ -421,7 +421,9 @@ def main():
         st.divider()
         st.markdown("**📧 Gmail Monitor**")
         st.success("Auto-scanning via Apps Script every 30 min ✅")
-        st.caption(f"🔄 Next refresh in **{remaining}s**")
+        IST = timezone(timedelta(hours=5, minutes=30))
+        next_refresh_ist = datetime.fromtimestamp(st.session_state["last_refresh"] + AUTO_REFRESH_SECONDS, tz=IST)
+        st.caption(f"🔄 Next refresh at **{next_refresh_ist.strftime('%I:%M:%S %p')} IST**")
         col_r, col_l = st.columns(2)
         with col_r:
             if st.button("🔄 Refresh Now", use_container_width=True):
