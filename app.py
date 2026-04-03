@@ -276,7 +276,9 @@ def css():
     .mn{font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:700}
     .ml{font-size:9px;color:#7880A4;text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
     .stButton>button{border-radius:6px!important;font-size:11px!important;padding:2px 7px!important}
-    .stTabs [data-baseweb="tab"]{padding:6px 10px!important;font-size:12px!important}
+    .stTabs [data-baseweb="tab-list"]{gap:4px!important}
+    .stTabs [data-baseweb="tab"]{padding:12px 18px!important;font-size:14px!important;min-height:48px!important;border-radius:8px 8px 0 0!important;cursor:pointer!important;-webkit-tap-highlight-color:transparent!important}
+    .stTabs [data-baseweb="tab"]:active{opacity:.75!important}
     h1,h2,h3{margin-top:0.4rem!important;margin-bottom:0.3rem!important}
     </style>""", unsafe_allow_html=True)
     # Auto-refresh via Streamlit's built-in rerun after delay
