@@ -475,6 +475,15 @@ def task_card(row, pfx=""):
     if is_notmine:
         c1,c2 = st.columns([1,5])
         if c1.button("↩ Reactivate", key=f"rm_{pfx}{tid}"): update_field(tid,"Status","Pending"); st.rerun()
+        c_edit = st.columns([1,5])[0]
+        if c_edit.button("✏️ Centre", key=f"ec_{pfx}{tid}"):
+            st.session_state[f"ce_{pfx}{tid}"] = not st.session_state.get(f"ce_{pfx}{tid}", False)
+        if st.session_state.get(f"ce_{pfx}{tid}"):
+            cur_idx = CENTRES.index(centre) if centre in CENTRES else 0
+            new_centre = st.selectbox("Change centre to:", CENTRES, index=cur_idx, key=f"cs_{pfx}{tid}")
+            if st.button("Update Centre", key=f"cu_{pfx}{tid}"):
+                update_field(tid, "Centre", new_centre)
+                st.session_state[f"ce_{pfx}{tid}"] = False; st.rerun()
         if notes:
             with st.expander("📝 Notes"): st.caption(notes)
     elif not is_done:
@@ -482,16 +491,24 @@ def task_card(row, pfx=""):
         if c1.button("✅ Done",   key=f"d_{pfx}{tid}"): update_field(tid,"Status","Done");     st.rerun()
         if c2.button("⏸ Hold",   key=f"h_{pfx}{tid}"): update_field(tid,"Status","On Hold");  st.rerun()
         if c3.button("❌ Reject", key=f"r_{pfx}{tid}"): update_field(tid,"Status","Rejected"); st.rerun()
-        c4,c5,c6 = st.columns(3)
+        c4,c5,c6,c7 = st.columns(4)
         if c4.button("🚫 Not Mine", key=f"nm_{pfx}{tid}"): update_field(tid,"Status","Not Mine"); st.rerun()
         if c5.button("👤 Assign",   key=f"a_{pfx}{tid}"):
             st.session_state[f"rs_{pfx}{tid}"] = not st.session_state.get(f"rs_{pfx}{tid}",False)
-        if c6.button("🗑 Delete",   key=f"x_{pfx}{tid}"): delete_row(tid); st.rerun()
+        if c6.button("✏️ Centre",   key=f"ec_{pfx}{tid}"):
+            st.session_state[f"ce_{pfx}{tid}"] = not st.session_state.get(f"ce_{pfx}{tid}", False)
+        if c7.button("🗑 Delete",   key=f"x_{pfx}{tid}"): delete_row(tid); st.rerun()
         if st.session_state.get(f"rs_{pfx}{tid}"):
             nm = st.text_input("Reassign to:", key=f"rn_{pfx}{tid}", placeholder="Name / email")
             if st.button("Confirm →", key=f"rc_{pfx}{tid}"):
                 update_field(tid,"Status","Reassigned"); update_field(tid,"Reassigned To",nm)
                 st.session_state[f"rs_{tid}"] = False; st.rerun()
+        if st.session_state.get(f"ce_{pfx}{tid}"):
+            cur_idx = CENTRES.index(centre) if centre in CENTRES else 0
+            new_centre = st.selectbox("Change centre to:", CENTRES, index=cur_idx, key=f"cs_{pfx}{tid}")
+            if st.button("Update Centre", key=f"cu_{pfx}{tid}"):
+                update_field(tid, "Centre", new_centre)
+                st.session_state[f"ce_{pfx}{tid}"] = False; st.rerun()
         if notes:
             with st.expander("📝 Notes"): st.caption(notes)
     st.markdown('<div style="height:3px"></div>', unsafe_allow_html=True)
