@@ -159,7 +159,7 @@ def load_holidays():
     try:
         resp = ai.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=4096,
+            max_tokens=8192,
             messages=[{"role": "user", "content": f"""Extract all holidays and public holidays from this Google Sheet data.
 Return ONLY a valid JSON array — no explanation, no markdown fences.
 Each item: {{"date": "YYYY-MM-DD", "name": "Holiday name", "centre": "Centre name or All"}}
@@ -175,6 +175,9 @@ Rules:
 Sheet data:
 {raw_text}"""}]
         )
+        if resp.stop_reason == "max_tokens":
+            errors.append("Claude response was truncated (too many holidays). Try reducing the sheet size or contact support.")
+            return events, errors, raw_text
         raw_json = resp.content[0].text.strip()
         if "```" in raw_json:
             raw_json = raw_json.split("```")[1]
