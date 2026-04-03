@@ -43,6 +43,19 @@ CENTRE_COLORS = {"Nettoor":"#6366F1","Kumbalam":"#7C3AED","Trivandrum":"#059669"
 STATUS_ICON = {"Pending":"🔵","Not Started":"⚪","In Progress":"🟡","On Hold":"🟠","Done":"✅","Rejected":"❌","Reassigned":"👤","Not Mine":"🚫"}
 SCOPES = ["https://spreadsheets.google.com/feeds","https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/drive"]
 
+# State → centre(s) mapping for holiday expansion
+STATE_CENTRES = {
+    "kerala":         ["Nettoor","Kumbalam","Changanassery","Kollam","Kannur"],
+    "karnataka":      ["Mysore","Bangalore"],
+    "assam":          ["Guwahati"],
+    "odisha":         ["Bhubaneswar"],
+    "gujarat":        ["Ahmedabad"],
+    "andhra pradesh": ["Visakhapatnam"],
+    "andhra":         ["Visakhapatnam"],
+    "telangana":      ["Visakhapatnam"],
+    "ap":             ["Visakhapatnam"],
+}
+
 PING_SHEET_ID      = "1uf4pqKHEAbw6ny7CVZZVMw23PTfmv0QZzdCyj4fU33c"
 PING_SERVERS_TAB   = "ServerStatus"
 SERVER_TYPE_ORDER  = ["Main Server","Backup Server","Bitvoice Gateway","Bitvoice Server"]
@@ -204,15 +217,25 @@ Sheet data:
                                 continue
                         except ValueError:
                             pass
-                        events.append({
-                            "date":   item["date"],
-                            "name":   item["name"],
-                            "centre": item.get("centre", "All"),
-                        })
+                        for c in normalize_centre(item.get("centre", "All")):
+                            events.append({
+                                "date":   item["date"],
+                                "name":   item["name"],
+                                "centre": c,
+                            })
         except Exception as e:
             errors.append(f"Chunk {chunk_idx+1}/{len(chunks)} parse failed: {type(e).__name__}: {e}")
 
-    return events, errors, raw_text
+    # Deduplicate (same date + name + centre may appear in multiple chunks)
+    seen = set()
+    deduped = []
+    for e in events:
+        key = (e["date"], e["name"], e["centre"])
+        if key not in seen:
+            seen.add(key)
+            deduped.append(e)
+
+    return deduped, errors, raw_text
 
 @st.cache_data(ttl=300)
 def load_gcal_events(year, month):
@@ -345,6 +368,25 @@ def detect_priority(text):
     if any(w in t for w in ["soon","this week","priority","medium"]):
         return "Medium"
     return "Medium"
+
+def normalize_centre(s):
+    """Map a centre code / abbreviation / state name to a list of canonical centre names."""
+    sl = s.lower().strip()
+    if sl in ("all", "", "all centres", "all centers", "pan india", "national"):
+        return ["All"]
+    # Exact match
+    for c in CENTRES:
+        if c.lower() == sl:
+            return [c]
+    # State → multiple centres
+    for state, centres in STATE_CENTRES.items():
+        if state in sl:
+            return centres
+    # Keyword match (uses same dict as task detection)
+    for centre, kws in CENTRE_KEYWORDS_PY.items():
+        if any(kw in sl for kw in kws):
+            return [centre]
+    return ["All"]  # unknown code → treat as all-centre holiday
 
 def _get_anthropic_key():
     """Try all known secret paths for the Anthropic API key."""
@@ -945,8 +987,8 @@ def main():
             gcal_evs = load_gcal_events(now_dt.year, now_dt.month)
 
         # ── Centre filter + Sunday toggle ─────────────────────
-        named_hols    = [h for h in holidays if h["name"] != "Sunday"]
-        hol_centres   = sorted({h["centre"] for h in named_hols if h["centre"] not in ("All", "")})
+        named_hols  = [h for h in holidays if h["name"] != "Sunday"]
+        hol_centres = sorted({h["centre"] for h in named_hols if h["centre"] not in ("All", "") and h["centre"] in CENTRES})
         fc1, fc2 = st.columns([3, 1])
         with fc1:
             sel_centres = st.multiselect(
@@ -959,28 +1001,51 @@ def main():
         with fc2:
             show_sundays = st.checkbox("Show Sundays", value=True, key="cal_show_sun")
 
-        def _show_holiday(h):
-            if h["name"] == "Sunday":
-                return show_sundays
+        def _centre_matches_filter(centre):
             if not sel_centres or "All" in sel_centres:
                 return True
-            return h["centre"] in sel_centres or h["centre"] == "All"
+            return centre in sel_centres or centre == "All"
+
+        # ── Group holidays by (date, name) → collect all centres ──
+        from collections import defaultdict
+        hol_groups = defaultdict(list)
+        for h in holidays:
+            hol_groups[(h["date"], h["name"])].append(h["centre"])
 
         # ── Build event list for streamlit-calendar ────────────
         cal_events = []
 
-        for h in holidays:
-            if not _show_holiday(h):
-                continue
-            is_sunday = h["name"] == "Sunday"
-            centre_label = f" · {h['centre']}" if h["centre"] not in ("All", "") and not is_sunday else ""
+        for (hdate, hname), centres in hol_groups.items():
+            centres = list(dict.fromkeys(centres))  # deduplicate, preserve order
+            is_sunday = hname == "Sunday"
+
+            if is_sunday:
+                if not show_sundays:
+                    continue
+            else:
+                # Show if any centre in the group matches the filter
+                if not any(_centre_matches_filter(c) for c in centres):
+                    continue
+
+            if is_sunday:
+                title = "Sunday"
+            elif "All" in centres:
+                title = f"🎉 {hname} · All Centres"
+            elif len(centres) == 1:
+                title = f"🎉 {hname} · {centres[0]}"
+            elif len(centres) <= 3:
+                title = f"🎉 {hname} · {', '.join(centres)}"
+            else:
+                title = f"🎉 {hname} · {', '.join(centres[:3])} +{len(centres)-3} more"
+
             cal_events.append({
-                "title":   "Sunday" if is_sunday else f"🎉 {h['name']}{centre_label}",
-                "start":   h["date"],
-                "allDay":  True,
-                "color":   "#DC2626" if is_sunday else "#059669",
-                "display": "background" if is_sunday else "block",
+                "title":     title,
+                "start":     hdate,
+                "allDay":    True,
+                "color":     "#DC2626" if is_sunday else "#059669",
+                "display":   "background" if is_sunday else "block",
                 "textColor": "#fff",
+                "extendedProps": {"centres": centres},
             })
 
         for ev in gcal_evs:
@@ -1017,8 +1082,11 @@ def main():
 
             # Show clicked event detail
             if cal_state and cal_state.get("eventClick"):
-                ev_info = cal_state["eventClick"].get("event", {})
-                st.info(f"**{ev_info.get('title','')}**  |  {ev_info.get('start','')[:10]}")
+                ev_info   = cal_state["eventClick"].get("event", {})
+                ep        = ev_info.get("extendedProps", {})
+                centres   = ep.get("centres", [])
+                ctr_label = f"  |  **Centres:** {', '.join(centres)}" if centres and centres != ["All"] else ""
+                st.info(f"**{ev_info.get('title','')}**  |  {ev_info.get('start','')[:10]}{ctr_label}")
 
         except ImportError:
             # Fallback list view if package not installed yet
