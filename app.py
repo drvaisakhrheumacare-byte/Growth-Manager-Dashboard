@@ -130,7 +130,7 @@ def load_holidays():
     gs_client = get_client()
     if not gs_client:
         errors.append("Google Sheets client unavailable.")
-        return events, errors
+        return events, errors, ""
 
     try:
         sh  = gs_client.open_by_key(HOLIDAY_SHEET_ID)
@@ -138,17 +138,21 @@ def load_holidays():
         raw_rows = ws.get_all_values()
     except Exception as e:
         errors.append(f"Cannot read '{HOLIDAY_TAB}' tab: {type(e).__name__}: {e}")
-        return events, errors
+        return events, errors, ""
 
     try:
-        ai = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
+        key = _get_anthropic_key()
+        if not key:
+            errors.append("Anthropic API key not found in secrets. Checked: ANTHROPIC_API_KEY, anthropic.api_key, gcp_service_account.ANTHROPIC_API_KEY")
+            return events, errors, ""
+        ai = anthropic.Anthropic(api_key=key)
     except Exception as e:
         errors.append(f"Claude API init failed: {type(e).__name__}: {e}")
-        return events, errors
+        return events, errors, ""
 
     if not raw_rows:
         errors.append(f"'{HOLIDAY_TAB}' tab appears empty.")
-        return events, errors
+        return events, errors, ""
 
     current_year = datetime.now().year
     raw_text = "\n".join(["\t".join(row) for row in raw_rows])
@@ -189,7 +193,7 @@ Sheet data:
     except Exception as e:
         errors.append(f"Claude parse failed: {type(e).__name__}: {e}")
 
-    return events, errors
+    return events, errors, raw_text
 
 @st.cache_data(ttl=300)
 def load_gcal_events(year, month):
@@ -290,11 +294,29 @@ def detect_priority(text):
         return "Medium"
     return "Medium"
 
+def _get_anthropic_key():
+    """Try all known secret paths for the Anthropic API key."""
+    for getter in [
+        lambda: st.secrets["ANTHROPIC_API_KEY"],
+        lambda: st.secrets["anthropic"]["api_key"],
+        lambda: st.secrets["gcp_service_account"]["ANTHROPIC_API_KEY"],
+    ]:
+        try:
+            v = getter()
+            if v:
+                return v
+        except Exception:
+            continue
+    return None
+
 @st.cache_resource
 def get_anthropic_client():
     try:
         import anthropic
-        return anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
+        key = _get_anthropic_key()
+        if not key:
+            return None
+        return anthropic.Anthropic(api_key=key)
     except Exception:
         return None
 
@@ -777,7 +799,7 @@ def main():
 
         # ── Load data ─────────────────────────────────────────
         with st.spinner("Loading calendar…"):
-            holidays, hol_errors = load_holidays()
+            holidays, hol_errors, hol_raw = load_holidays()
             now_dt   = datetime.now()
             gcal_evs = load_gcal_events(now_dt.year, now_dt.month)
 
@@ -868,7 +890,7 @@ def main():
                 st.markdown(f"{icon} **{ev['start'][:10]}** — {ev['title']}")
 
         # ── Debug / diagnostics ───────────────────────────────
-        with st.expander("🔍 Holiday load diagnostics", expanded=bool(hol_errors)):
+        with st.expander("🔍 Holiday load diagnostics", expanded=bool(hol_errors) or len(named_hols) == 0):
             st.markdown(f"**Named holidays loaded:** {len(named_hols)}  |  **Centres found:** {', '.join(hol_centres) or 'none'}")
             st.markdown(f"[Open Holiday Sheet](https://docs.google.com/spreadsheets/d/{HOLIDAY_SHEET_ID}/edit)")
             if hol_errors:
@@ -877,6 +899,9 @@ def main():
                     st.code(err)
             else:
                 st.success("Holiday sheet loaded successfully.")
+            if hol_raw:
+                st.markdown("**Raw sheet data received:**")
+                st.text(hol_raw[:3000])
         with st.expander("ℹ️ Setup notes", expanded=False):
             st.markdown(f"""
 **Work Calendar:** Events load from `{MY_EMAIL}` via the service account.
