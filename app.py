@@ -156,11 +156,10 @@ def load_holidays():
 
     current_year = datetime.now().year
     raw_text = "\n".join(["\t".join(row) for row in raw_rows])
-    try:
-        resp = ai.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=8192,
-            messages=[{"role": "user", "content": f"""Extract all holidays and public holidays from this Google Sheet data.
+
+    def _parse_chunk(chunk_rows):
+        chunk_text = "\n".join(["\t".join(r) for r in chunk_rows])
+        prompt = f"""Extract all holidays and public holidays from this Google Sheet data.
 Return ONLY a valid JSON array — no explanation, no markdown fences.
 Each item: {{"date": "YYYY-MM-DD", "name": "Holiday name", "centre": "Centre name or All"}}
 
@@ -173,28 +172,39 @@ Rules:
 - There may be multiple centres in the same sheet — extract all rows
 
 Sheet data:
-{raw_text}"""}]
+{chunk_text}"""
+        resp = ai.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=4096,
+            messages=[{"role": "user", "content": prompt}]
         )
         if resp.stop_reason == "max_tokens":
-            errors.append("Claude response was truncated (too many holidays). Try reducing the sheet size or contact support.")
-            return events, errors, raw_text
-        raw_json = resp.content[0].text.strip()
-        if "```" in raw_json:
-            raw_json = raw_json.split("```")[1]
-            if raw_json.startswith("json"):
-                raw_json = raw_json[4:]
-        raw_json = raw_json.strip()
-        parsed = json.loads(raw_json)
-        if isinstance(parsed, list):
-            for item in parsed:
-                if item.get("date") and item.get("name"):
-                    events.append({
-                        "date":   item["date"],
-                        "name":   item["name"],
-                        "centre": item.get("centre", "All"),
-                    })
-    except Exception as e:
-        errors.append(f"Claude parse failed: {type(e).__name__}: {e}")
+            return None, "truncated"
+        raw = resp.content[0].text.strip()
+        if "```" in raw:
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        return json.loads(raw.strip()), None
+
+    CHUNK_SIZE = 60
+    chunks = [raw_rows[i:i+CHUNK_SIZE] for i in range(0, len(raw_rows), CHUNK_SIZE)]
+    for chunk_idx, chunk in enumerate(chunks):
+        try:
+            parsed, err = _parse_chunk(chunk)
+            if err:
+                errors.append(f"Chunk {chunk_idx+1}/{len(chunks)} was truncated — some holidays may be missing.")
+                continue
+            if isinstance(parsed, list):
+                for item in parsed:
+                    if item.get("date") and item.get("name"):
+                        events.append({
+                            "date":   item["date"],
+                            "name":   item["name"],
+                            "centre": item.get("centre", "All"),
+                        })
+        except Exception as e:
+            errors.append(f"Chunk {chunk_idx+1}/{len(chunks)} parse failed: {type(e).__name__}: {e}")
 
     return events, errors, raw_text
 
