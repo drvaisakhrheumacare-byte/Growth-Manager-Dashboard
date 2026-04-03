@@ -198,6 +198,12 @@ Sheet data:
             if isinstance(parsed, list):
                 for item in parsed:
                     if item.get("date") and item.get("name"):
+                        try:
+                            d = date.fromisoformat(item["date"])
+                            if d.weekday() == 5:  # Saturday — skip, these are reminder entries only
+                                continue
+                        except ValueError:
+                            pass
                         events.append({
                             "date":   item["date"],
                             "name":   item["name"],
