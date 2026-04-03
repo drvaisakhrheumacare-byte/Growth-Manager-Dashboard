@@ -141,7 +141,7 @@ def load_holidays():
         return events, errors
 
     try:
-        ai = anthropic.Anthropic(api_key=st.secrets["anthropic"]["api_key"])
+        ai = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
     except Exception as e:
         errors.append(f"Claude API init failed: {type(e).__name__}: {e}")
         return events, errors
