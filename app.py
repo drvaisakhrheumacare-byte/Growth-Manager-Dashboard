@@ -240,7 +240,7 @@ def _parse_holidays_python(raw_rows, current_year):
     return events
 
 
-@st.cache_data(ttl=86400)
+@st.cache_data(ttl=3600)
 def load_holidays():
     """Load holidays from sheet + auto-add all Sundays.
     Uses Claude AI to parse irregular formats when available; falls back to Python parser.
@@ -355,7 +355,7 @@ Sheet data:
 
     return deduped, errors, raw_text
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def load_gcal_events(year, month):
     """Load events from the work Google Calendar for the given month."""
     try:
