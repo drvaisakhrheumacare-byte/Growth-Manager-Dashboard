@@ -38,7 +38,7 @@ CATEGORIES = ["Civil Work","Admin / Hardware","Regulatory / Licence","IT / Syste
 STATUSES   = ["Pending","Not Started","In Progress","On Hold","Done","Rejected","Reassigned","Not Mine"]
 PRIORITIES = ["","High","Medium","Low"]
 SOURCES    = ["Email","Tracker","Manual","Meeting","WhatsApp"]
-SHEET_COLS = ["ID","Centre","Category","Title","Due Date","Days Overdue","Status","Priority","Owner","Source","Notes","Reassigned To","Date Added","Last Updated","Email Message ID"]
+SHEET_COLS = ["ID","Centre","Category","Title","Due Date","Days Overdue","Status","Priority","Owner","Source","Notes","Reassigned To","Date Added","Last Updated","Email Message ID","Parent ID"]
 CENTRE_COLORS = {"Nettoor":"#6366F1","Kumbalam":"#7C3AED","Trivandrum":"#059669","Bhubaneswar":"#65A30D","Kannur":"#EA580C","Changanassery":"#0891B2","Guwahati":"#2563EB","Kollam":"#0D9488","Mysore":"#D97706","Bangalore":"#DB2777","Ahmedabad":"#F59E0B","Visakhapatnam":"#DC2626","Others":"#16A34A"}
 STATUS_ICON = {"Pending":"🔵","Not Started":"⚪","In Progress":"🟡","On Hold":"🟠","Done":"✅","Rejected":"❌","Reassigned":"👤","Not Mine":"🚫"}
 SCOPES = ["https://spreadsheets.google.com/feeds","https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/drive"]
@@ -250,6 +250,39 @@ def delete_row(tid):
         ws.delete_rows(cell.row); load_tasks.clear(); return True
     except: return False
 
+def set_parent(child_id, parent_id):
+    """Set or clear Parent ID on a task. Pass parent_id="" to unlink."""
+    return update_field(child_id, "Parent ID", str(parent_id) if parent_id else "")
+
+def find_duplicate_groups(tasks_df):
+    """Use Claude AI to find groups of similar/duplicate tasks. Returns list of {parent_id, child_ids}."""
+    import json, re
+    client = get_anthropic_client()
+    if not client or tasks_df.empty:
+        return []
+    task_list = "\n".join([
+        f"ID:{int(r['ID'])} Centre:{r['Centre']} | {str(r['Title'])[:120]}"
+        for _, r in tasks_df.iterrows()
+    ])
+    prompt = f"""You are reviewing tasks for a healthcare clinic chain manager. Identify groups of tasks that appear to be about the SAME underlying issue — likely created because multiple people sent separate emails about it.
+
+Return ONLY a raw JSON array. Each element: {{"parent_id": <keep this as main>, "child_ids": [<link these under parent>]}}
+If no duplicates found, return [].
+
+Tasks:
+{task_list}"""
+    try:
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        raw = re.sub(r'^```(?:json)?', '', resp.content[0].text.strip()).rstrip('`').strip()
+        result = json.loads(raw)
+        return result if isinstance(result, list) else []
+    except Exception:
+        return []
+
 CENTRE_KEYWORDS_PY = {
     "Nettoor":       ["nettoor","nettur"],
     "Kumbalam":      ["kumbalam","kbl"],
@@ -405,6 +438,7 @@ def css():
     .qm_{background:rgba(236,72,153,.15);color:#F9A8D4}.hi_{background:rgba(245,158,11,.12);color:#FCD34D}
     .em_{background:rgba(20,184,166,.15);color:#5EEAD4}.tr_{background:rgba(99,102,241,.15);color:#A5B4FC}
     .ct_{background:rgba(120,128,164,.15);color:#9CA3AF}
+    .lk_{background:rgba(52,211,153,.15);color:#34D399}
     .ch{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#7880A4;padding:5px 0 4px;border-bottom:1px solid rgba(255,255,255,.05);margin:12px 0 7px}
     .mrow{display:flex;gap:8px;margin-bottom:10px;flex-wrap:nowrap}
     .met{background:#1C2030;border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:9px 12px;flex:1;min-width:60px;text-align:center}
@@ -424,7 +458,7 @@ def css():
     }}, {AUTO_REFRESH_SECONDS * 1000});
     </script>""", unsafe_allow_html=True)
 
-def task_card(row, pfx=""):
+def task_card(row, pfx="", is_child=False):
     status  = str(row.get("Status","")).strip()
     overdue = int(row.get("Days Overdue",0))
     cat     = str(row.get("Category",""))
@@ -437,9 +471,15 @@ def task_card(row, pfx=""):
     due     = str(row.get("Due Date",""))
     notes   = str(row.get("Notes",""))
     reassign= str(row.get("Reassigned To",""))
+    parent_id = str(row.get("Parent ID","")).strip()
     is_done    = status in ["Done","Rejected"]
     is_notmine = status == "Not Mine"
     clr     = CENTRE_COLORS.get(centre,"#2563EB")
+
+    # Find children of this task (only for top-level cards)
+    df_all = load_tasks()
+    children = df_all[df_all["Parent ID"].astype(str).str.strip() == str(tid)] if (not is_child and not df_all.empty) else pd.DataFrame()
+    has_children = not children.empty
 
     cc = "tc"
     if is_notmine:            cc += " notmine"
@@ -460,16 +500,18 @@ def task_card(row, pfx=""):
     s2 = f'<span class="bdg em_">✉ Email</span>'     if src=="email"   else \
          f'<span class="bdg tr_">📊 Tracker</span>'  if src=="tracker" else \
          f'<span class="bdg ct_">{src.title()}</span>' if src else ""
-    pb = '<span class="bdg hi_">★ High</span>'       if pri=="High" else ""
-    cb = f'<span class="bdg ct_">{cat}</span>'        if cat else ""
-    db = f'<span>📅 {due}</span>'                     if due else ""
-    ob = f'<span>👤 {owner}</span>'                   if owner and owner!="Dr. Vaisakh V S" else ""
-    rb = f'<span>↪ {reassign}</span>'                 if reassign else ""
-    tc = "ttl done" if (is_done or is_notmine) else "ttl"
+    pb  = '<span class="bdg hi_">★ High</span>'       if pri=="High" else ""
+    cb  = f'<span class="bdg ct_">{cat}</span>'        if cat else ""
+    db  = f'<span>📅 {due}</span>'                     if due else ""
+    ob  = f'<span>👤 {owner}</span>'                   if owner and owner!="Dr. Vaisakh V S" else ""
+    rb  = f'<span>↪ {reassign}</span>'                 if reassign else ""
+    glb = f'<span class="bdg lk_">🔗 {len(children)} linked</span>' if has_children else ""
+    slb = '<span class="bdg lk_">↳ sub-task</span>'   if parent_id else ""
+    tc  = "ttl done" if (is_done or is_notmine) else "ttl"
 
     st.markdown(f"""<div class="{cc}" style="border-left-color:{clr}">
         <div class="{tc}">{title}</div>
-        <div class="tmeta">{sb}{s2}{pb}{cb}{db}{ob}{rb}</div>
+        <div class="tmeta">{sb}{s2}{pb}{cb}{db}{ob}{rb}{glb}{slb}</div>
     </div>""", unsafe_allow_html=True)
 
     if is_notmine:
@@ -509,8 +551,32 @@ def task_card(row, pfx=""):
             if st.button("Update Centre", key=f"cu_{pfx}{tid}"):
                 update_field(tid, "Centre", new_centre)
                 st.session_state[f"ce_{pfx}{tid}"] = False; st.rerun()
+        # ── Grouping controls ─────────────────────────────────────
+        if is_child and parent_id:
+            if st.button("🔓 Unlink from parent", key=f"ul_{pfx}{tid}"):
+                set_parent(tid, ""); st.rerun()
+        elif not is_child:
+            if st.button("🔗 Link to parent task", key=f"lk_{pfx}{tid}"):
+                st.session_state[f"lnk_{pfx}{tid}"] = not st.session_state.get(f"lnk_{pfx}{tid}", False)
+            if st.session_state.get(f"lnk_{pfx}{tid}"):
+                eligible = df_all[(df_all["ID"] != tid) & (df_all["Parent ID"].astype(str).str.strip() == "")]
+                opts = {f"#{int(r['ID'])}: {str(r['Title'])[:70]}": int(r['ID']) for _, r in eligible.iterrows()}
+                if opts:
+                    sel = st.selectbox("Set as sub-task of:", list(opts.keys()), key=f"lks_{pfx}{tid}")
+                    if st.button("Confirm Link", key=f"lkc_{pfx}{tid}"):
+                        set_parent(tid, opts[sel])
+                        st.session_state[f"lnk_{pfx}{tid}"] = False; st.rerun()
+                else:
+                    st.info("No eligible parent tasks found.")
         if notes:
             with st.expander("📝 Notes"): st.caption(notes)
+
+    # Show linked sub-tasks collapsed under parent
+    if has_children:
+        with st.expander(f"↳ {len(children)} linked task(s)", expanded=False):
+            for _, child_row in children.iterrows():
+                task_card(child_row, pfx=f"sub_{pfx}", is_child=True)
+
     st.markdown('<div style="height:3px"></div>', unsafe_allow_html=True)
 
 def login_screen():
@@ -623,13 +689,52 @@ def main():
 
     t1,t2,t3,t4,t5,t6,t7 = st.tabs(["🗂️ Active","🔴 Overdue","📊 By Centre","➕ Add Task","📈 Analytics","🖥️ Server Monitor","📅 Calendar"])
 
+    # IDs of tasks that are sub-tasks — excluded from top-level display
+    child_ids = set(df[df["Parent ID"].astype(str).str.strip() != ""]["ID"].tolist()) if not df.empty else set()
+
     with t1:
         active = filt[~filt["Status"].isin(["Done","Rejected","On Hold","Not Mine"])]
-        if active.empty:
+        # ── AI duplicate finder ───────────────────────────────────
+        with st.expander("🤖 Find Duplicate / Similar Tasks", expanded=False):
+            st.caption("AI scans active task titles and suggests which ones may be duplicates (same issue, multiple senders).")
+            if st.button("🔍 Scan for Duplicates", key="dup_scan"):
+                scan_df = active[~active["ID"].isin(child_ids)][["ID","Title","Centre","Category"]].head(100)
+                with st.spinner("Scanning with AI..."):
+                    st.session_state["dup_suggestions"] = find_duplicate_groups(scan_df)
+            suggestions = st.session_state.get("dup_suggestions", [])
+            if suggestions:
+                st.markdown(f"**{len(suggestions)} potential group(s) found — review and accept:**")
+                to_remove = []
+                for i, grp in enumerate(suggestions):
+                    pid   = grp.get("parent_id")
+                    cids  = grp.get("child_ids", [])
+                    p_row = df[df["ID"] == pid]
+                    if p_row.empty: to_remove.append(i); continue
+                    p_title = p_row.iloc[0]["Title"]
+                    st.markdown(f"**Group {i+1}:** Keep **#{pid}: {p_title[:80]}** as main")
+                    for cid in cids:
+                        c_row = df[df["ID"] == cid]
+                        c_title = c_row.iloc[0]["Title"] if not c_row.empty else f"#{cid}"
+                        st.markdown(f"&nbsp;&nbsp;↳ link **#{cid}: {c_title[:80]}**")
+                    ga, gs = st.columns(2)
+                    if ga.button("✅ Accept", key=f"dup_acc_{i}"):
+                        for cid in cids: set_parent(cid, pid)
+                        st.session_state["dup_suggestions"] = [s for j,s in enumerate(suggestions) if j != i]
+                        st.rerun()
+                    if gs.button("⏭ Skip", key=f"dup_skip_{i}"):
+                        st.session_state["dup_suggestions"] = [s for j,s in enumerate(suggestions) if j != i]
+                        st.rerun()
+                if not suggestions:
+                    st.success("No duplicate groups found.")
+            elif "dup_suggestions" in st.session_state:
+                st.success("✅ No more suggestions.")
+        # ── Task list (top-level only) ────────────────────────────
+        top_active = active[~active["ID"].isin(child_ids)]
+        if top_active.empty:
             st.success("🎉 No active tasks!")
         else:
             for centre in CENTRES:
-                cdf = active[active["Centre"]==centre]
+                cdf = top_active[top_active["Centre"]==centre]
                 if cdf.empty: continue
                 clr = CENTRE_COLORS.get(centre,"#2563EB")
                 st.markdown(f'<div class="ch" style="color:{clr}">🏥 {centre.upper()} · {len(cdf)} active</div>', unsafe_allow_html=True)
@@ -637,7 +742,7 @@ def main():
                     task_card(row, pfx="t1_")
 
     with t2:
-        odf = filt[(filt["Days Overdue"]>0)&(~filt["Status"].isin(["Done","Rejected"]))].sort_values("Days Overdue",ascending=False)
+        odf = filt[(filt["Days Overdue"]>0)&(~filt["Status"].isin(["Done","Rejected"]))&(~filt["ID"].isin(child_ids))].sort_values("Days Overdue",ascending=False)
         if odf.empty: st.success("🎉 No overdue tasks!")
         else:
             st.error(f"⚠️ {len(odf)} overdue — most critical first")
@@ -646,14 +751,14 @@ def main():
     with t3:
         smry = []
         for c in CENTRES:
-            cdf = df[df["Centre"]==c]
+            cdf = df[(df["Centre"]==c) & (~df["ID"].isin(child_ids))]
             if cdf.empty: continue
             smry.append({"Centre":c,"Active":len(cdf[~cdf["Status"].isin(["Done","Rejected"])]),"Overdue":len(cdf[(cdf["Days Overdue"]>0)&(~cdf["Status"].isin(["Done","Rejected"]))]),"Pending":len(cdf[cdf["Status"].isin(["Pending","Not Started"])]),"Hold":len(cdf[cdf["Status"]=="On Hold"]),"Done":len(cdf[cdf["Status"].isin(["Done","Rejected"])]),"Total":len(cdf)})
         if smry:
             st.dataframe(pd.DataFrame(smry), use_container_width=True, hide_index=True)
             st.divider()
             pick = st.selectbox("Drill into centre:", CENTRES)
-            pdf  = filt[filt["Centre"]==pick]
+            pdf  = filt[(filt["Centre"]==pick) & (~filt["ID"].isin(child_ids))]
             if not pdf.empty:
                 for _,row in pdf.sort_values("Days Overdue",ascending=False).iterrows(): task_card(row, pfx="t3_")
             else: st.info(f"No tasks for {pick}.")
