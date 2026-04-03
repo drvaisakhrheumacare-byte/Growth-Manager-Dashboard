@@ -904,11 +904,13 @@ def task_card(row, pfx="", is_child=False):
             if st.button("🔗 Link to parent task", key=f"lk_{pfx}{tid}"):
                 st.session_state[f"lnk_{pfx}{tid}"] = not st.session_state.get(f"lnk_{pfx}{tid}", False)
             if st.session_state.get(f"lnk_{pfx}{tid}"):
-                this_centre = str(row.get("Centre", "")).strip()
+                this_centre    = str(row.get("Centre", "")).strip()
+                active_statuses = {"Pending", "Not Started", "In Progress", "On Hold"}
                 eligible = df_all[
                     (df_all["ID"] != tid) &
                     (df_all["Parent ID"].astype(str).str.strip() == "") &
-                    (df_all["Centre"].astype(str).str.strip() == this_centre)
+                    (df_all["Centre"].astype(str).str.strip() == this_centre) &
+                    (df_all["Status"].isin(active_statuses))
                 ]
                 opts = {f"#{int(r['ID'])}: {str(r['Title'])[:70]}": int(r['ID']) for _, r in eligible.iterrows()}
                 if opts:
