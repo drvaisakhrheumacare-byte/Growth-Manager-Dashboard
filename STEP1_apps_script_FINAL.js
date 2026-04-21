@@ -61,21 +61,95 @@ const SKIP_SENDERS = [
 ];
 
 // ── SHEET HELPERS ─────────────────────────────────────────────
+// Column widths (pixels) — indexed same as SHEET_COLS
+const COL_WIDTHS = [50,110,140,360,90,75,95,80,140,70,320,130,90,120,160,70];
+// Col:  ID  Ctr  Cat  Title  Due  OvD  Sts  Pri  Owner  Src  Notes  Reasn  DtAdd  LUpd  MsgID  ParID
+
+const STATUS_COLORS = {
+  "Done":        "#E8F5E9",  // soft green
+  "Rejected":    "#F3E5F5",  // soft purple
+  "In Progress": "#E3F2FD",  // soft blue
+  "On Hold":     "#FFF8E1",  // soft amber
+  "Pending":     "#FAFAFA",  // near white
+  "Not Started": "#FAFAFA",
+  "Reassigned":  "#FFF3E0",  // soft orange
+  "Not Mine":    "#ECEFF1",  // soft grey
+};
+const OVERDUE_COLOR  = "#FDECEA";  // soft red — overrides status colour
+const PRIORITY_BOLD  = ["High"];   // make High priority rows bold
+
 function getSheet() {
   const ss = SpreadsheetApp.openById(SHEET_ID);
   let ws = ss.getSheetByName(SHEET_NAME);
   if (!ws) {
     ws = ss.insertSheet(SHEET_NAME);
-    ws.getRange(1,1,1,SHEET_COLS.length).setValues([SHEET_COLS])
-      .setFontWeight("bold")
-      .setBackground("#1C2030")
-      .setFontColor("#E8EAFF");
-    ws.setFrozenRows(1);
-    ws.setColumnWidth(4, 400);   // Title
-    ws.setColumnWidth(11, 350);  // Notes
-    ws.setColumnWidth(15, 180);  // Email Message ID
+    _writeHeader(ws);
   }
   return ws;
+}
+
+function _writeHeader(ws) {
+  const hdr = ws.getRange(1,1,1,SHEET_COLS.length);
+  hdr.setValues([SHEET_COLS])
+     .setFontWeight("bold")
+     .setFontSize(11)
+     .setBackground("#1C2030")
+     .setFontColor("#E8EAFF")
+     .setHorizontalAlignment("center");
+  ws.setFrozenRows(1);
+  ws.setFrozenColumns(1);
+  COL_WIDTHS.forEach((w,i) => ws.setColumnWidth(i+1, w));
+  // Data validation dropdowns
+  const lastRow = 2000;
+  _addValidation(ws, SHEET_COLS.indexOf("Status")+1,   lastRow, ["Pending","Not Started","In Progress","On Hold","Done","Rejected","Reassigned","Not Mine"]);
+  _addValidation(ws, SHEET_COLS.indexOf("Priority")+1, lastRow, ["High","Medium","Low",""]);
+  _addValidation(ws, SHEET_COLS.indexOf("Centre")+1,   lastRow, ["Kumbalam","Kollam","Guwahati","Mysuru","Visakhapatnam","Bengaluru","Kochi","Thiruvananthapuram","Kannur","Changanassery","Bhubaneswar","Ahmedabad","General"]);
+}
+
+function _addValidation(ws, col, lastRow, values) {
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(values, true)
+    .setAllowInvalid(true)
+    .build();
+  ws.getRange(2, col, lastRow, 1).setDataValidation(rule);
+}
+
+/**
+ * Apply background colour + formatting to a single data row.
+ * Call this after every appendRow.
+ */
+function _formatRow(ws, rowIndex, status, daysOverdue) {
+  const nCols = SHEET_COLS.length;
+  const range = ws.getRange(rowIndex, 1, 1, nCols);
+  const isOverdue = parseInt(daysOverdue) > 0;
+  const bg = isOverdue ? OVERDUE_COLOR : (STATUS_COLORS[status] || "#FFFFFF");
+  range.setBackground(bg)
+       .setFontSize(10)
+       .setVerticalAlignment("top")
+       .setFontWeight(PRIORITY_BOLD.includes(status) ? "bold" : "normal");
+  // Wrap Notes column only
+  const notesCol = SHEET_COLS.indexOf("Notes")+1;
+  ws.getRange(rowIndex, notesCol).setWrap(true);
+  // Light grey border between rows
+  range.setBorder(false, false, true, false, false, false, "#DDDDDD", SpreadsheetApp.BorderStyle.SOLID);
+}
+
+/**
+ * formatSheet() — run once manually to reformat ALL existing rows.
+ * Safe to run multiple times.
+ */
+function formatSheet() {
+  const ws   = getSheet();
+  _writeHeader(ws);   // re-apply header in case it drifted
+  const last = ws.getLastRow();
+  if (last < 2) { Logger.log("No data rows to format."); return; }
+  const statusCol  = SHEET_COLS.indexOf("Status");
+  const overdueCol = SHEET_COLS.indexOf("Days Overdue");
+  const data = ws.getRange(2,1,last-1,SHEET_COLS.length).getValues();
+  data.forEach((row, i) => {
+    _formatRow(ws, i+2, String(row[statusCol]), row[overdueCol]);
+  });
+  Logger.log(`✅ Formatted ${data.length} rows.`);
 }
 
 function getNextId(ws) {
@@ -388,6 +462,7 @@ function scanGmailForTasks() {
                 ""       // col 16 = Parent ID — empty, set manually via dashboard
               ];
               ws.appendRow(row);
+              _formatRow(ws, ws.getLastRow(), "Pending", 0);
               newTasks.push({ ...task, from, multiNote });
               Logger.log(`✅ Task ${idx+1}/${tasks.length}: [${task.centre}] ${task.title}`);
             });
@@ -593,3 +668,94 @@ function setupTriggers() {
 function scanNow()          { scanGmailForTasks(); }
 function digestNow()        { sendDigest(); }
 function updateOverdueNow() { updateOverdueDays(); }
+
+/**
+ * backfill30Days() — run ONCE manually to pull all emails from last 30 days.
+ * processedIds dedup ensures nothing is double-added.
+ * After it finishes, the normal 36h rolling window takes over.
+ */
+function backfill30Days() {
+  Logger.log("🔁 Starting 30-day backfill...");
+  const ws          = getSheet();
+  const allRows     = getAllRows(ws);
+  const processedIds= getProcessedMsgIds(allRows);
+  const threadMap   = getThreadMap(allRows);
+  const label       = ensureLabel();
+  const newTasks    = [];
+
+  const queries = [
+    `to:${MY_EMAIL} newer_than:30d`,
+    `cc:${MY_EMAIL} newer_than:30d`,
+  ];
+
+  const seenThreads = new Set();
+
+  queries.forEach(query => {
+    try {
+      GmailApp.search(query, 0, 500).forEach(thread => {
+        const threadId = thread.getId();
+        if (seenThreads.has(threadId)) return;
+        seenThreads.add(threadId);
+
+        const messages = thread.getMessages();
+        messages.forEach(msg => {
+          const msgId = msg.getId();
+          if (processedIds.has(msgId)) return;
+
+          const from    = msg.getFrom() || "";
+          const subject = msg.getSubject() || "(No Subject)";
+          const body    = msg.getPlainBody() || "";
+          const date_   = Utilities.formatDate(msg.getDate(),"Asia/Kolkata","yyyy-MM-dd");
+
+          const fromLower = from.toLowerCase();
+          if (SKIP_SENDERS.some(s => fromLower.includes(s))) {
+            processedIds.add(msgId);
+            try { thread.addLabel(label); } catch(e) {}
+            return;
+          }
+
+          if (threadMap[threadId]) {
+            processedIds.add(msgId);
+            try { thread.addLabel(label); } catch(e) {}
+            return;
+          }
+
+          const tasks = parseWithClaude(subject, from, body, date_);
+          if (tasks.length > 0) {
+            tasks.forEach((task, idx) => {
+              const taskId    = getNextId(ws);
+              const multiNote = tasks.length > 1 ? ` [Task ${idx+1} of ${tasks.length}]` : "";
+              const row = [
+                taskId, task.centre, task.category,
+                task.title,
+                task.due_date || "", 0,
+                "Pending", task.priority || "Medium",
+                "Dr. Vaisakh V S", "Email",
+                `From: ${from}\nDate: ${date_}\nSubject: ${subject}${multiNote}\n\nReason: ${task.reason}\n\n${body.substring(0,300)}\n\nThreadID:${threadId}`,
+                "", todayIST(), nowIST(),
+                msgId, ""
+              ];
+              ws.appendRow(row);
+              _formatRow(ws, ws.getLastRow(), "Pending", 0);
+              newTasks.push({ ...task, from });
+              Logger.log(`  ✅ [${date_}] [${task.centre}] ${task.title}`);
+            });
+            const label_ = tasks.length > 1 ? `${tasks[0].title} (+${tasks.length-1} more)` : tasks[0].title;
+            threadMap[threadId] = { rowIndex: ws.getLastRow(), status: "Pending", title: label_ };
+          } else {
+            Logger.log(`  ⏭ Not a task: ${subject}`);
+          }
+          processedIds.add(msgId);
+          try { thread.addLabel(label); } catch(e) {}
+          Utilities.sleep(300);
+        });
+      });
+    } catch(e) {
+      Logger.log("Backfill query error: "+e.message);
+    }
+  });
+
+  // Also reformat all rows for clean look
+  formatSheet();
+  Logger.log(`✅ 30-day backfill done. ${newTasks.length} new tasks added.`);
+}
