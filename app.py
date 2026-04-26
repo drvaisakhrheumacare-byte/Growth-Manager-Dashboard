@@ -1500,140 +1500,134 @@ Any format is supported — Claude AI parses the sheet, with Python fallback if 
 """)
 
     with t8:
-        from html import escape as _esc
-        _df_p = filt.copy()
-        _ap   = _df_p[~_df_p["Status"].isin(["Done","Rejected","Not Mine"]) & ~_df_p["ID"].isin(child_ids)]
-        _dp   = _df_p[_df_p["Status"].isin(["Done","Rejected"]) & ~_df_p["ID"].isin(child_ids)]
-        _PORD = {"High":0,"Medium":1,"Low":2,"":3}
+        try:
+            PORD  = {"High":0,"Medium":1,"Low":2,"":3}
+            PDOT  = {"High":"#EF4444","Medium":"#F59E0B","Low":"#3B82F6","":"#6B7280"}
+            PTCOL = {"High":"#FCA5A5","Medium":"#D1D5DB","Low":"#9CA3AF","":"#9CA3AF"}
+            PLAB  = {"High":"HIGH","Medium":"MEDIUM","Low":"LOW","":"OTHER"}
+            PLCOL = {"High":"#F87171","Medium":"#FCD34D","Low":"#93C5FD","":"#9CA3AF"}
 
-        _ta   = len(_ap)
-        _tov  = len(_ap[_ap["Days Overdue"]>0])
-        _thi  = len(_ap[_ap["Priority"]=="High"])
-        _tmd  = len(_ap[_ap["Priority"]=="Medium"])
-        _tip  = len(_ap[_ap["Status"]=="In Progress"])
-        _toh  = len(_ap[_ap["Status"]=="On Hold"])
-        _nctr = len([c for c in CENTRES if len(_ap[_ap["Centre"]==c])>0])
-        _usr  = st.session_state.get("username","")
-        _nows = datetime.now().strftime("%d %b %Y · %H:%M")
+            _ap = filt[~filt["Status"].isin(["Done","Rejected","Not Mine"]) & ~filt["ID"].isin(child_ids)]
+            _dp = filt[filt["Status"].isin(["Done","Rejected"]) & ~filt["ID"].isin(child_ids)]
 
-        def _grp(tasks, prio, lim):
-            if tasks.empty or lim[0]<=0: return ""
-            D  = {"High":"dot-high","Medium":"dot-med","Low":"dot-low"}
-            TC = {"High":"ti-high","Medium":"ti-med","Low":"ti-low"}
-            LC = {"High":"gl-high","Medium":"gl-med","Low":"gl-low"}
-            LB = {"High":"HIGH","Medium":"MEDIUM","Low":"LOW"}
-            out = f'<div class="grp-lbl {LC[prio]}">{LB[prio]}</div>'
-            for _, r in tasks.iterrows():
-                if lim[0]<=0: break
-                t    = _esc(str(r.get("Title",""))[:70])
-                ov   = int(r.get("Days Overdue",0))
-                st_  = str(r.get("Status",""))
-                ov_h = f'<span class="ov-tag">▲{ov}d</span>' if ov>0 else ""
-                ip_h = '<span class="ip-tag">▶</span>'        if st_=="In Progress" else ""
-                ho_h = '<span class="ho-tag">⏸</span>'        if st_=="On Hold"     else ""
-                rs_h = '<span class="rs-tag">↪</span>'        if st_=="Reassigned"  else ""
-                out += f'<div class="t-item"><span class="t-dot {D[prio]}"></span><span class="t-title {TC[prio]}">{t}</span>{ov_h}{ip_h}{ho_h}{rs_h}</div>'
-                lim[0] -= 1
-            return out
+            nctr = len([c for c in CENTRES if len(_ap[_ap["Centre"]==c])>0])
+            usr  = st.session_state.get("username","")
+            nows = datetime.now().strftime("%d %b %Y · %H:%M")
 
-        _cards = ""
-        for centre in CENTRES:
-            _ca = _ap[_ap["Centre"]==centre].copy()
-            _cd = _dp[_dp["Centre"]==centre]
-            if _ca.empty and _cd.empty: continue
-            clr  = CENTRE_COLORS.get(centre,"#2563EB")
-            na   = len(_ca)
-            nov  = len(_ca[_ca["Days Overdue"]>0])
-            nhi  = len(_ca[_ca["Priority"]=="High"])
-            nd   = len(_cd)
-            nt   = na + nd
-            pct  = int(nd/nt*100) if nt else 0
-            _ca["_po"] = _ca["Priority"].map(lambda x: _PORD.get(x,3))
-            _ca = _ca.sort_values(["_po","Days Overdue"], ascending=[True,False])
-            lim  = [8]
-            th   = _grp(_ca[_ca["Priority"]=="High"],                      "High",   lim)
-            tm   = _grp(_ca[_ca["Priority"]=="Medium"],                     "Medium", lim)
-            tl   = _grp(_ca[~_ca["Priority"].isin(["High","Medium"])],      "Low",    lim)
-            shown = 8 - lim[0]
-            rem   = na - shown
-            more  = f'<div class="p-more">+{rem} more tasks</div>' if rem>0 else ""
-            cats  = _ca["Category"].value_counts().head(3)
-            pills = "".join([f'<span class="c-pill">{c}</span>' for c in cats.index])
-            ob    = f'<span class="ov-hdrbdg">⚠ {nov}</span>' if nov else ""
-            hb    = f'<span class="hi-hdrbdg">★ {nhi}</span>' if nhi else ""
-            _cards += f'''<div class="ccard" style="--clr:{clr};border-top-color:{clr}">
-<div class="ccard-top"><span class="cname">{centre}</span><span class="cbdgs">{ob}{hb}</span></div>
-<div class="cstats">
-  <div class="cs"><span class="csn" style="color:{clr}">{na}</span><span class="csl">Active</span></div>
-  <div class="cs"><span class="csn" style="color:#F87171">{nov}</span><span class="csl">Overdue</span></div>
-  <div class="cs"><span class="csn" style="color:#6EE7B7">{nd}</span><span class="csl">Done</span></div>
-  <div class="cs"><span class="csn" style="color:#9CA3AF">{pct}%</span><span class="csl">Closed</span></div>
-</div>
-<div class="prog-wrap"><div class="prog-bar" style="width:{pct}%;background:{clr}"></div></div>
-<div class="tlist">{th}{tm}{tl}{more}</div>
-<div class="cftr">{pills}</div>
-</div>'''
+            # ── Header ──────────────────────────────────────────────────────
+            st.markdown(
+                f'<div style="padding-bottom:14px;border-bottom:1px solid rgba(255,255,255,.07);margin-bottom:16px">'
+                f'<span style="font-size:21px;font-weight:700;color:#E8EAFF">Growth Portfolio · RheumaCARE</span>'
+                f'<span style="font-size:12px;color:#7880A4;margin-left:12px">Dr. Vaisakh VS · {nctr} centres active · {nows} · 👤 {usr}</span>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
 
-        st.markdown(f'''<style>
-.pw{{font-family:"DM Sans",sans-serif;padding:4px 0 40px}}
-.phdr{{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid rgba(255,255,255,.07)}}
-.ptitle{{font-size:22px;font-weight:700;color:#E8EAFF;letter-spacing:-.3px}}
-.psub{{font-size:12px;color:#7880A4;margin-top:3px}}
-.pts{{font-size:12px;color:#7880A4;text-align:right;line-height:1.8}}
-.smry{{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:24px}}
-.sm{{background:#1C2030;border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:14px 10px;text-align:center}}
-.smn{{font-family:"JetBrains Mono",monospace;font-size:24px;font-weight:700;display:block;line-height:1}}
-.sml{{font-size:9.5px;color:#7880A4;text-transform:uppercase;letter-spacing:.5px;margin-top:5px;display:block}}
-.cgrid{{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}}
-.ccard{{background:#1C2030;border:1px solid rgba(255,255,255,.08);border-radius:12px;border-top:3px solid;padding:16px 16px 12px;display:flex;flex-direction:column}}
-.ccard-top{{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}}
-.cname{{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;color:var(--clr,#6366F1)}}
-.cbdgs{{display:flex;gap:5px}}
-.ov-hdrbdg,.hi-hdrbdg{{font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px}}
-.ov-hdrbdg{{background:rgba(239,68,68,.15);color:#F87171}}
-.hi-hdrbdg{{background:rgba(245,158,11,.15);color:#FCD34D}}
-.cstats{{display:flex;gap:2px;margin-bottom:10px}}
-.cs{{flex:1;text-align:center}}
-.csn{{font-size:17px;font-weight:700;font-family:"JetBrains Mono",monospace;display:block;line-height:1}}
-.csl{{font-size:9px;color:#7880A4;text-transform:uppercase;letter-spacing:.3px;display:block;margin-top:2px}}
-.prog-wrap{{background:rgba(255,255,255,.06);border-radius:4px;height:4px;margin-bottom:12px;overflow:hidden}}
-.prog-bar{{height:100%;border-radius:4px}}
-.tlist{{display:flex;flex-direction:column;gap:1px;margin-bottom:10px;flex:1}}
-.grp-lbl{{font-size:8.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;padding:7px 0 2px;margin-top:2px}}
-.gl-high{{color:#F87171}}.gl-med{{color:#FCD34D}}.gl-low{{color:#93C5FD}}
-.t-item{{display:flex;align-items:flex-start;gap:7px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.025)}}
-.t-dot{{width:6px;height:6px;border-radius:50%;flex-shrink:0;margin-top:5px}}
-.dot-high{{background:#EF4444}}.dot-med{{background:#F59E0B}}.dot-low{{background:#3B82F6}}
-.t-title{{font-size:11.5px;line-height:1.35;flex:1}}
-.ti-high{{color:#FCA5A5}}.ti-med{{color:#D1D5DB}}.ti-low{{color:#9CA3AF}}
-.ov-tag{{font-size:8.5px;font-weight:700;color:#F87171;background:rgba(239,68,68,.12);padding:1px 5px;border-radius:3px;white-space:nowrap;flex-shrink:0;margin-top:3px}}
-.ip-tag{{font-size:9px;color:#60A5FA;flex-shrink:0;margin-top:2px}}
-.ho-tag{{font-size:9px;color:#FCD34D;flex-shrink:0;margin-top:2px}}
-.rs-tag{{font-size:9px;color:#A78BFA;flex-shrink:0;margin-top:2px}}
-.p-more{{font-size:11px;color:#4B5563;font-style:italic;padding:5px 0 0 13px}}
-.cftr{{display:flex;flex-wrap:wrap;gap:4px;padding-top:10px;border-top:1px solid rgba(255,255,255,.05)}}
-.c-pill{{font-size:9px;background:rgba(120,128,164,.12);color:#6B7280;padding:2px 7px;border-radius:20px}}
-@media(max-width:1200px){{.cgrid{{grid-template-columns:repeat(2,1fr)}}}}
-@media(max-width:760px){{.cgrid{{grid-template-columns:1fr}}.smry{{grid-template-columns:repeat(3,1fr)}}}}
-</style>
-<div class="pw">
-<div class="phdr">
-  <div>
-    <div class="ptitle">Growth Portfolio &middot; RheumaCARE</div>
-    <div class="psub">Dr. Vaisakh VS &middot; Growth Manager &middot; {_nctr} centres active</div>
-  </div>
-  <div class="pts"><div>{_nows}</div><div>&#128100; {_usr}</div></div>
-</div>
-<div class="smry">
-  <div class="sm"><span class="smn" style="color:#E8EAFF">{_ta}</span><span class="sml">Active Tasks</span></div>
-  <div class="sm"><span class="smn" style="color:#F87171">{_tov}</span><span class="sml">Overdue</span></div>
-  <div class="sm"><span class="smn" style="color:#FBBF24">{_thi}</span><span class="sml">High Priority</span></div>
-  <div class="sm"><span class="smn" style="color:#93C5FD">{_tmd}</span><span class="sml">Medium</span></div>
-  <div class="sm"><span class="smn" style="color:#34D399">{_tip}</span><span class="sml">In Progress</span></div>
-  <div class="sm"><span class="smn" style="color:#FCD34D">{_toh}</span><span class="sml">On Hold</span></div>
-</div>
-<div class="cgrid">{_cards}</div>
-</div>''', unsafe_allow_html=True)
+            # ── Summary metrics ──────────────────────────────────────────────
+            m1,m2,m3,m4,m5,m6 = st.columns(6)
+            m1.metric("Active Tasks",  len(_ap))
+            m2.metric("Overdue",       len(_ap[_ap["Days Overdue"]>0]))
+            m3.metric("High Priority", len(_ap[_ap["Priority"]=="High"]))
+            m4.metric("Medium",        len(_ap[_ap["Priority"]=="Medium"]))
+            m5.metric("In Progress",   len(_ap[_ap["Status"]=="In Progress"]))
+            m6.metric("On Hold",       len(_ap[_ap["Status"]=="On Hold"]))
+
+            st.markdown('<div style="margin-bottom:16px"></div>', unsafe_allow_html=True)
+
+            # ── Centre cards — 3 per row ─────────────────────────────────────
+            active_centres = [c for c in CENTRES
+                              if not (_ap[_ap["Centre"]==c].empty and _dp[_dp["Centre"]==c].empty)]
+
+            for row_i in range(0, len(active_centres), 3):
+                row_ctrs = active_centres[row_i:row_i+3]
+                cols = st.columns(3)
+                for ci, centre in enumerate(row_ctrs):
+                    with cols[ci]:
+                        ca = _ap[_ap["Centre"]==centre].copy()
+                        cd = _dp[_dp["Centre"]==centre]
+                        clr = CENTRE_COLORS.get(centre,"#2563EB")
+                        na  = len(ca)
+                        nov = len(ca[ca["Days Overdue"]>0])
+                        nhi = len(ca[ca["Priority"]=="High"])
+                        nd  = len(cd)
+                        nt  = na + nd
+                        pct = int(nd/nt*100) if nt else 0
+
+                        ob = (f'<span style="background:rgba(239,68,68,.15);color:#F87171;'
+                              f'font-size:9px;font-weight:700;padding:2px 6px;border-radius:20px">⚠ {nov}</span>') if nov else ""
+                        hb = (f'<span style="background:rgba(245,158,11,.15);color:#FCD34D;'
+                              f'font-size:9px;font-weight:700;padding:2px 6px;border-radius:20px">★ {nhi}</span>') if nhi else ""
+
+                        # Card header + stats
+                        st.markdown(
+                            f'<div style="border-top:3px solid {clr};background:#1C2030;border-radius:10px;'
+                            f'padding:12px 14px 10px;margin-bottom:4px">'
+                            f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
+                            f'<span style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:{clr}">{centre}</span>'
+                            f'<span style="display:flex;gap:4px">{ob}{hb}</span></div>'
+                            f'<div style="display:flex;text-align:center">'
+                            f'<div style="flex:1"><div style="font-size:17px;font-weight:700;color:{clr}">{na}</div>'
+                            f'<div style="font-size:9px;color:#7880A4;text-transform:uppercase">Active</div></div>'
+                            f'<div style="flex:1"><div style="font-size:17px;font-weight:700;color:#F87171">{nov}</div>'
+                            f'<div style="font-size:9px;color:#7880A4;text-transform:uppercase">Overdue</div></div>'
+                            f'<div style="flex:1"><div style="font-size:17px;font-weight:700;color:#6EE7B7">{nd}</div>'
+                            f'<div style="font-size:9px;color:#7880A4;text-transform:uppercase">Done</div></div>'
+                            f'<div style="flex:1"><div style="font-size:17px;font-weight:700;color:#9CA3AF">{pct}%</div>'
+                            f'<div style="font-size:9px;color:#7880A4;text-transform:uppercase">Closed</div></div>'
+                            f'</div>'
+                            f'<div style="background:rgba(255,255,255,.06);border-radius:3px;height:3px;margin-top:10px;overflow:hidden">'
+                            f'<div style="width:{pct}%;height:100%;background:{clr};border-radius:3px"></div></div>'
+                            f'</div>',
+                            unsafe_allow_html=True
+                        )
+
+                        # Task list
+                        if not ca.empty:
+                            ca = ca.copy()
+                            ca["_po"] = ca["Priority"].map(lambda x: PORD.get(x,3))
+                            ca = ca.sort_values(["_po","Days Overdue"], ascending=[True,False])
+
+                            thtml = '<div style="background:#1C2030;border-radius:8px;padding:8px 12px 10px;margin-bottom:10px">'
+                            last_p = None
+                            shown  = 0
+                            for _, r in ca.iterrows():
+                                if shown >= 8: break
+                                p   = str(r.get("Priority",""))
+                                ttl = str(r.get("Title",""))[:68]
+                                ov  = int(r.get("Days Overdue",0))
+                                st_ = str(r.get("Status",""))
+
+                                if p != last_p:
+                                    thtml += (f'<div style="font-size:8px;font-weight:700;letter-spacing:.8px;'
+                                              f'color:{PLCOL.get(p,"#9CA3AF")};padding:6px 0 2px;text-transform:uppercase">'
+                                              f'{PLAB.get(p,"OTHER")}</div>')
+                                    last_p = p
+
+                                ov_s = (f'<span style="font-size:8px;font-weight:700;color:#F87171;'
+                                        f'background:rgba(239,68,68,.12);padding:1px 4px;border-radius:3px;'
+                                        f'margin-left:4px;white-space:nowrap">▲{ov}d</span>') if ov>0 else ""
+                                ip_s = '<span style="font-size:9px;color:#60A5FA;margin-left:3px">▶</span>' if st_=="In Progress" else ""
+                                ho_s = '<span style="font-size:9px;color:#FCD34D;margin-left:3px">⏸</span>' if st_=="On Hold" else ""
+
+                                thtml += (
+                                    f'<div style="display:flex;align-items:flex-start;gap:6px;padding:3px 0;'
+                                    f'border-bottom:1px solid rgba(255,255,255,.025)">'
+                                    f'<span style="width:6px;height:6px;border-radius:50%;background:{PDOT.get(p,"#6B7280")};'
+                                    f'flex-shrink:0;margin-top:5px;display:inline-block"></span>'
+                                    f'<span style="font-size:11.5px;color:{PTCOL.get(p,"#9CA3AF")};flex:1;line-height:1.35">'
+                                    f'{ttl}</span>{ov_s}{ip_s}{ho_s}</div>'
+                                )
+                                shown += 1
+
+                            if na > 8:
+                                thtml += f'<div style="font-size:11px;color:#4B5563;font-style:italic;padding:5px 0 0 12px">+{na-8} more tasks</div>'
+                            thtml += '</div>'
+                            st.markdown(thtml, unsafe_allow_html=True)
+
+        except Exception as _e:
+            import traceback
+            st.error(f"Portfolio error: {_e}")
+            st.code(traceback.format_exc())
 
 if __name__=="__main__": main()
 # ── NATIVE STREAMLIT AUTO-REFRESH ─────────────────────────────
