@@ -1006,7 +1006,7 @@ def main():
           <div class="met"><div class="mn" style="color:#6EE7B7">{dn}</div><div class="ml">Done</div></div>
         </div>""", unsafe_allow_html=True)
 
-    t1,t2,t3,t4,t5,t6,t7,t8 = st.tabs(["🗂 Active","🔴 Overdue","📊 Centres","➕ Add","📈 Analytics","🖥 Servers","📅 Calendar","📋 Portfolio"])
+    tport,t1,t2,t3,t4,t5,t6,t7 = st.tabs(["📋 Portfolio","🗂 Active","🔴 Overdue","📊 Centres","➕ Add","📈 Analytics","🖥 Servers","📅 Calendar"])
 
     # IDs of tasks that are sub-tasks — excluded from top-level display
     child_ids = set(df[df["Parent ID"].astype(str).str.strip() != ""]["ID"].tolist()) if not df.empty else set()
@@ -1499,7 +1499,7 @@ Share your Google Calendar with `taskflow-bot@taskflow-490709.iam.gserviceaccoun
 Any format is supported — Claude AI parses the sheet, with Python fallback if no API key is set.
 """)
 
-    with t8:
+    with tport:
         try:
             PORD  = {"High":0,"Medium":1,"Low":2,"":3}
             PDOT  = {"High":"#EF4444","Medium":"#F59E0B","Low":"#3B82F6","":"#6B7280"}
